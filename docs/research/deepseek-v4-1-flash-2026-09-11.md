@@ -234,7 +234,8 @@ routes unchanged. The guarded route requires native Codex transport identity;
 other clients without that metadata receive a terminal local HTTP 400 on this
 route. Native OpenAI traffic and unguarded routes retain their existing behavior.
 
-Identity follows observed Codex CLI 0.159.2 transport fields, not agent names,
+Identity follows observed Codex CLI 0.159.2 and bundled Desktop
+0.159.0-alpha.12.1 transport fields, not agent names,
 session names, prompt text, or model-supplied headers. A root execution uses its
 stable `(thread_id, turn_id)` pair, including tool round trips and native
 `request_kind: compaction` work in the same execution. A later root turn
@@ -243,6 +244,11 @@ in the same chat starts a separate allowance. An explicitly classified
 for its lifetime, including a follow-up after completion. The parent lineage is
 validated; the shared `session_id` is not a worker discriminator. Missing,
 contradictory, unsupported, or ambiguous identities fail closed in this scope.
+Bundled Desktop app-server roots omit the analytics `thread_source` or set it to
+`agent_created_thread`. These observed shapes require matching session and thread
+metadata and transport headers, no worker lineage, and `root_turn_id == turn_id`.
+Standalone manual compaction starts a new native turn; automatic compaction can
+retain its originating turn. No missing turn or root identity is synthesized.
 The checked-in fixture retains only identity fields from actual local native
 observations, with agent names omitted.
 

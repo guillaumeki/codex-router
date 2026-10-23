@@ -39,6 +39,41 @@ test("actual native tool rounds, root new turn, child and completed-worker follo
     { "x-codex-turn-metadata": "x".repeat(16_385) }]) refused(() => nativeBudgetIdentity(headers));
 });
 
+test("bundled Desktop app-server roots retain exact turn boundaries without inventing lineage", () => {
+  const desktop = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url))).desktop_requests;
+  for (const offset of [0, 4]) {
+    const first = nativeBudgetIdentity(desktop[offset]);
+    assert.equal(first.kind, "root");
+    assert.deepEqual(nativeBudgetIdentity(desktop[offset + 1]), first);
+    for (const next of [desktop[offset + 2], desktop[offset + 3]]) {
+      const identity = nativeBudgetIdentity(next);
+      assert.equal(identity.threadId, first.threadId);
+      assert.notEqual(identity.turnId, first.turnId);
+    }
+    const source = JSON.parse(desktop[offset]["x-codex-turn-metadata"]);
+    for (const patch of [
+      { thread_source: "unknown" }, { thread_source: null },
+      { parent_thread_id: first.threadId }, { parent_turn_id: first.turnId },
+      { subagent_kind: "thread_spawn" }, { root_turn_id: identity.turnId },
+      { root_turn_id: undefined }, { request_kind: undefined },
+      { session_id: identity.threadId },
+    ]) {
+      refused(() => nativeBudgetIdentity({ ...desktop[offset], "x-codex-turn-metadata": JSON.stringify({ ...source, ...patch }) }));
+    }
+    for (const key of ["thread-id", "session-id"]) {
+      refused(() => nativeBudgetIdentity({ ...desktop[offset], [key]: undefined }));
+      refused(() => nativeBudgetIdentity({ ...desktop[offset], [key]: identity.threadId }));
+    }
+    for (const key of ["x-openai-subagent", "x-codex-parent-thread-id"]) {
+      refused(() => nativeBudgetIdentity({ ...desktop[offset], [key]: first.threadId }));
+    }
+    const admission = new CumulativeUsageAdmission(ledger());
+    admission.reserve(request({ identity: first, limits: { ...limits, maxAttempts: 1 } }));
+    refused(() => admission.reserve(request({ identity: nativeBudgetIdentity(desktop[offset + 1]), requestId: "tool-round", limits: { ...limits, maxAttempts: 1 } })));
+    admission.reserve(request({ identity: nativeBudgetIdentity(desktop[offset + 2]), requestId: "new-turn", limits: { ...limits, maxAttempts: 1 } }));
+  }
+});
+
 test("only opted-in routes replace caller extra_headers with router-owned identity", () => {
   const payload = { extra_headers: { [BUDGET_IDENTITY_HEADER]: "spoof", [BUDGET_REQUEST_HEADER]: "spoof", authorization: "spoof" } };
   const route = { workingInputLimits: { cumulative: limits } };
