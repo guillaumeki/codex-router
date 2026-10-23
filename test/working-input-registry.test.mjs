@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { userModelEntry } from "../src/user-models.mjs";
+import { cumulativeBudgetEnabled } from "../src/native-budget-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -57,13 +58,15 @@ test("registry validates both finite positive working input limit pairs", (t) =>
   }
 });
 
-test("DeepSeek trial lowers compaction without inflating provider capacity", async () => {
-  const { MODEL_BY_SLUG } = await import("../src/model-registry.mjs");
+test("DeepSeek Go default keeps native compaction without router input limits", async () => {
+  const { CHECKED_IN_MODELS, MODEL_BY_SLUG } = await import("../src/model-registry.mjs");
+  const checkedIn = CHECKED_IN_MODELS.find(({ slug }) => slug === "opencode-go/deepseek-v4.1-flash");
   const route = MODEL_BY_SLUG.get("opencode-go/deepseek-v4.1-flash");
+  assert.equal(checkedIn?.workingInputLimits, undefined);
+  assert.equal(route.workingInputLimits, undefined);
+  assert.equal(cumulativeBudgetEnabled(route), false);
   assert.equal(route.contextWindow, 1_000_000);
   assert.equal(route.autoCompact, 150_000);
-  assert.deepEqual(route.workingInputLimits, { ...LIMITS, cumulative: { maxAttempts: 60, maxInputTokens: 10_000_000 } });
-  assert.equal(MODEL_BY_SLUG.get("deepseek/deepseek-v4.1-flash").workingInputLimits, undefined);
 });
 
 test("admission counts UTF-8 instructions and tools below the usage estimator floor", async () => {
