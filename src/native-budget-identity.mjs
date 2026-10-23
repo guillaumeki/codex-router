@@ -46,6 +46,14 @@ export function nativeBudgetIdentity(headers) {
 
 }
 
+// Ordinary Responses requests also carry native compaction turns. Never let an
+// unvalidated request_kind select the larger, still finite input allowance.
+export function nativeCompactionIntent(headers) {
+  if (headers?.["x-codex-turn-metadata"] === undefined) return false;
+  nativeBudgetIdentity(headers);
+  return JSON.parse(headers["x-codex-turn-metadata"]).request_kind === "compaction";
+}
+
 export function bridgeBudgetIdentity(route, request, payload) {
   if (!cumulativeBudgetEnabled(route)) return payload;
   const identity = nativeBudgetIdentity(request.headers);
