@@ -23,7 +23,15 @@ export function nativeBudgetIdentity(headers) {
   }
   let metadata;
   try { metadata = JSON.parse(raw); } catch { throw budgetError("The guarded route requires valid native turn metadata."); }
-  const root = metadata?.thread_source === "user" && !metadata.parent_thread_id && !metadata.parent_turn_id && !metadata.subagent_kind;
+  // Bundled Desktop 0.159.0-alpha.12.1 app-server roots omit the analytics
+  // source or use agent_created_thread. Neither denotes a spawned worker.
+  // Those shapes require the observed session/thread transport agreement;
+  // root_turn_id and the absence of all worker lineage are still checked.
+  const desktopRoot = (metadata?.thread_source === undefined || metadata.thread_source === "agent_created_thread") &&
+    UUID.test(metadata?.session_id) && metadata.session_id === metadata.thread_id &&
+    headers["thread-id"] === metadata.thread_id && headers["session-id"] === metadata.session_id;
+  const root = (metadata?.thread_source === "user" || desktopRoot) &&
+    !metadata.parent_thread_id && !metadata.parent_turn_id && !metadata.subagent_kind;
   const worker = metadata?.thread_source === "subagent" && metadata.subagent_kind === "thread_spawn" &&
     UUID.test(metadata.parent_thread_id) && UUID.test(metadata.parent_turn_id);
   if (!UUID.test(metadata?.thread_id) || !UUID.test(metadata?.turn_id) ||
