@@ -43,7 +43,8 @@ test("registry validates both finite positive working input limit pairs", (t) =>
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout).workingInputLimits, limits);
   }
-  for (const limits of [null, false, {}, [], { generation: LIMITS.generation },
+  for (const limits of [null, false, {}, [],
+    { ...LIMITS, cumulative: { maxAttempts: 60, maxInputTokens: 10_000_000 } }, { generation: LIMITS.generation },
     { ...LIMITS, generation: { ...LIMITS.generation, maxTextBytes: "1048576" } },
     { ...LIMITS, compaction: { ...LIMITS.compaction, maxEstimatedTokens: 0 } },
     { ...LIMITS, compaction: { ...LIMITS.compaction, maxTextBytes: -1 } },
@@ -61,7 +62,7 @@ test("DeepSeek trial lowers compaction without inflating provider capacity", asy
   const route = MODEL_BY_SLUG.get("opencode-go/deepseek-v4.1-flash");
   assert.equal(route.contextWindow, 1_000_000);
   assert.equal(route.autoCompact, 150_000);
-  assert.deepEqual(route.workingInputLimits, LIMITS);
+  assert.deepEqual(route.workingInputLimits, { ...LIMITS, cumulative: { maxAttempts: 60, maxInputTokens: 10_000_000 } });
   assert.equal(MODEL_BY_SLUG.get("deepseek/deepseek-v4.1-flash").workingInputLimits, undefined);
 });
 
