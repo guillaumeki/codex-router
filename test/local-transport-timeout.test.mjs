@@ -13,7 +13,7 @@ test("local timeout defaults and overrides remain in seconds with a transport ma
 
 test("router routes only local and Grok through long-idle fetch", () => {
   const source = readFileSync(new URL("../src/router.mjs", import.meta.url), "utf8");
-  const block = source.match(/function fetchForRoute\(route, url, init\) \{[\s\S]*?\n\}/)?.[0];
+  const block = source.match(/function fetchForRoute\(route, url, init, options\) \{[\s\S]*?\n\}/)?.[0];
   assert.ok(block);
   assert.match(source, /const LOCAL_TRANSPORT_IDLE_TIMEOUT_MS = localTransportIdleTimeoutMs\(\);/);
   assert.match(block, /isGrokOauthRoute\(route\)[\s\S]*?bodyTimeoutMs: GROK_TRANSPORT_IDLE_TIMEOUT_MS/);

@@ -159,6 +159,7 @@ import { maxImageTokensForRoute } from "./prompt-image-usage.mjs";
 import { usesNativeChatReasoning } from "./chat-reasoning.mjs";
 import {
   estimateInputTokens,
+  requestInputSize,
   mergeTokenUsage,
   ResponseUsageTransform,
   tokenUsageFromPayload,
@@ -421,9 +422,31 @@ function isGrokOauthRoute(route) {
   return Boolean(route) && canonicalProviderId(route.provider) === "grok-oauth";
 }
 
+// Admit the final provider-bound bytes, including on child, replay and failover
+// paths. Compaction has its own finite allowance; native traffic has no route.
+function assertWorkingInputLimit(route, body, { compaction = false } = {}) {
+  if (route?.workingInputLimits === undefined) return;
+  const limits = route.workingInputLimits;
+  const validPair = (pair) => pair && typeof pair === "object" && !Array.isArray(pair) &&
+    Number.isSafeInteger(pair.maxEstimatedTokens) && pair.maxEstimatedTokens > 0 &&
+    Number.isSafeInteger(pair.maxTextBytes) && pair.maxTextBytes > 0;
+  const valid = limits && typeof limits === "object" && !Array.isArray(limits) &&
+    validPair(limits.generation) && validPair(limits.compaction);
+  const size = requestInputSize(body, { maxTokensPerImage: maxImageTokensForRoute(route) });
+  const bound = valid ? limits[compaction ? "compaction" : "generation"] : undefined;
+  if (bound && size.estimatedTokens <= bound.maxEstimatedTokens && size.textBytes <= bound.maxTextBytes) return;
+  const error = new Error(bound
+    ? `The provider-bound ${compaction ? "compaction" : "generation"} request exceeds this route's working input limit. Reduce the context or compact within the configured compaction limit.`
+    : "The route has invalid working input limits; correct its configuration before retrying.");
+  error.status = 400;
+  error.code = "router_resource_budget_exceeded";
+  throw error;
+}
+
 // Grok keeps its stall-guard-sized pool. Local Ollama uses a separate pool
 // whose headers and body idle bounds outlast its LiteLLM timeout.
-function fetchForRoute(route, url, init) {
+function fetchForRoute(route, url, init, options) {
+  assertWorkingInputLimit(route, init.body, options);
   // A followed generation redirect destroys evidence about the original POST.
   // Native transport must reject it before a later connect failure can look unsent.
   if (!route && String(init?.method).toUpperCase() === "POST") {
@@ -3188,7 +3211,7 @@ async function summarizeWith(
     headers: routedHeaders(),
     body: serialized,
     signal,
-  });
+  }, { compaction: true });
   return { upstream, bridged, bytes: Buffer.byteLength(serialized, "utf8") };
 }
 
@@ -4403,7 +4426,7 @@ async function attemptModelFailover({
       });
       progress?.headers();
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted || error?.code === "router_resource_budget_exceeded") throw error;
       const compatibilityCode = candidateBuildCompatibilityCode(error);
       logFailover(
         route,
@@ -5848,8 +5871,8 @@ async function handleResponses(request, response, requestUrl) {
       );
     }
   } catch (error) {
-    // A local goal refusal has no upstream response latency to meter.
-    if (!(error instanceof GoalContinuationNoProgressError)) upstreamLatencyMs ??= Date.now() - startedAt;
+    // Local refusals have no upstream response latency to meter.
+    if (!(error instanceof GoalContinuationNoProgressError) && error?.code !== "router_resource_budget_exceeded") upstreamLatencyMs ??= Date.now() - startedAt;
     if (activity.deadlineExceeded()) {
       finalStatus = 504;
       activityStatus = 504;
@@ -5877,6 +5900,21 @@ async function handleResponses(request, response, requestUrl) {
           message: "The router canceled a request that exceeded its execution deadline.",
         });
       }
+      return;
+    }
+    if (error?.code === "router_resource_budget_exceeded" && !response.headersSent) {
+      finalStatus = 400;
+      activityStatus = 400;
+      clearStagedResponseHead(response);
+      writeJson(response, 400, { error: {
+        type: "resource_budget_error", code: error.code, message: error.message,
+      } });
+      recordTurnUsage({
+        model: route?.slug || requestedModel,
+        provider: route ? canonicalProviderId(route.provider) : "openai",
+        status: 400, durationMs: Date.now() - startedAt,
+      }, diagnostics);
+      usageRecorded = true;
       return;
     }
     if (
