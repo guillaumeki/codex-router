@@ -117,6 +117,46 @@ test("actual pooled retry is denied after final reservation without sending anot
   assert.equal(rows(f.state).filter((row) => row.cumulativeAdmission === "outcome").length, 1);
 });
 
+for (const pooled of [false, true]) {
+  for (const status of [302, 307]) {
+    test(`guarded ${pooled ? "pooled" : "nonpooled"} ${status} refuses redirect after one final reservation`, { timeout: 20_000 }, async (t) => {
+      let targetRequests = 0;
+      const target = http.createServer((request, response) => {
+        targetRequests++;
+        request.resume();
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end('{"choices":[{"message":{"role":"assistant","content":"redirect target"},"finish_reason":"stop"}]}');
+      });
+      await new Promise((resolve) => target.listen(0, "127.0.0.1", resolve));
+      t.after(async () => { target.closeAllConnections(); await new Promise((resolve) => target.close(resolve)); });
+      const f = await fixture(t, { seed: 59, pooled, reply: (response) => {
+        response.writeHead(status, { Location: `http://127.0.0.1:${target.address().port}/target` });
+        response.end();
+      } });
+      const result = await f.send();
+      assert.equal(result.status, pooled ? 503 : 502, result.body);
+      assert.equal(JSON.parse(result.body).error.type,
+        pooled ? "provider_api_key_pool_unavailable" : "provider_api_proxy_error");
+      assert.equal(targetRequests, 0);
+      assert.equal(f.received.length, 1);
+      assert.equal(rows(f.state).filter((row) => row.cumulativeAdmission === "reservation").length, 60);
+      assert.equal(rows(f.state).filter((row) => row.cumulativeAdmission === "outcome").length, 1);
+      const denied = await f.send();
+      assert.equal(denied.status, 400, denied.body);
+      assert.match(denied.body, /router_resource_budget_exceeded/);
+      assert.equal(f.received.length, 1);
+      assert.equal(targetRequests, 0);
+      if (!pooled && status === 302) {
+        const control = await f.send({ headers: {}, model: "opencode-go-glm-5-3" });
+        assert.equal(control.status, 200, control.body);
+        assert.match(control.body, /redirect target/);
+        assert.equal(targetRequests, 1, "unguarded route retains automatic redirect following");
+        assert.equal(rows(f.state).filter((row) => row.cumulativeAdmission === "reservation").length, 60);
+      }
+    });
+  }
+}
+
 test("missing identity and unreadable accounting fail before real provider transport", { timeout: 20_000 }, async (t) => {
   const f = await fixture(t);
   const denied = await f.send({ headers: {} });

@@ -260,6 +260,9 @@ it synchronously checks the scope totals including outstanding requests, appends
 a reservation to the existing `usage-events.jsonl`, fsyncs it, and consumes the
 reservation in memory. No await separates the check/reservation from fetch.
 Each row joins the existing router request ID and a monotonic attempt ordinal.
+Guarded sends refuse upstream HTTP redirects and retain the
+reservation; configure the final API endpoint. They never send to the redirect
+target. Unguarded routes preserve their existing redirect behavior.
 Failure to read, recover, append, or fsync accounting denies transport with a
 terminal `router_resource_budget_exceeded`; that refusal is neither retried nor
 failed over. It is not a provider quota signal. The forwarder emits the resource-budget

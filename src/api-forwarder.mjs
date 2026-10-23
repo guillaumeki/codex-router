@@ -1,5 +1,6 @@
 import { Readable } from "node:stream";
 import { CumulativeUsageAdmission } from "./usage-events.mjs";
+import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { ResponseUsageTransform, requestInputSize } from "./response-usage.mjs";
 import { maxImageTokensForRoute } from "./prompt-image-usage.mjs";
 import { cumulativeBudgetEnabled, internalBudgetIdentity } from "./native-budget-identity.mjs";
@@ -1945,7 +1946,11 @@ async function sendProviderAttempt(normalized, budgetScope, target, init) {
   });
   // No await between the synchronous check+durable reservation and fetch.
   let upstream;
-  try { upstream = await fetch(target, init); }
+  try {
+    // A guarded attempt owns exactly one send; fetch must not follow a
+    // redirect internally outside the durable reservation boundary.
+    upstream = await rejectGenerationRedirect(await fetch(target, { ...init, redirect: "manual" }));
+  }
   catch (error) { cumulativeAdmission.settle(ticket); throw error; }
   if (!upstream.body) { cumulativeAdmission.settle(ticket); return upstream; }
   let observedInput;
