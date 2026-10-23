@@ -264,8 +264,8 @@ test("ordinary generation crosses retired local ceilings while compaction remain
     assert.equal(upstreamRequests.length, before + 1, "old context reaches bounded summarizer");
     await reject(0, compact([text("界".repeat(150_000))]), {}, endpoint);
   }
-  // A requested guarded Go route owns its allowance even when a different,
-  // larger configured summarizer is selected because Go is cooling down.
+  // The default Go route has no router compaction allowance. While Go is
+  // cooling down, the configured summarizer receives the request.
   writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true, chain: [entries[3].slug] }));
   writeFileSync(path.join(stateDir, "provider-cooldowns.json"), JSON.stringify({
     "opencode-go": { until: new Date(Date.now() + 60_000).toISOString(), reason: "out_of_usage" },
@@ -278,9 +278,8 @@ test("ordinary generation crosses retired local ceilings while compaction remain
         input: endpoint === "/responses" ? [...largeInput, { type: "compaction_trigger" }] : largeInput }),
       signal: AbortSignal.timeout(10_000) });
     const body = await result.json();
-    assert.equal(result.status, 400, JSON.stringify(body));
-    assert.equal(body.error.code, "router_resource_budget_exceeded");
-    assert.equal(upstreamRequests.length, before, "requested compaction budget must deny before another summarizer sends");
+    assert.equal(result.status, 200, JSON.stringify(body));
+    assert.equal(upstreamRequests.length, before + 1, "the selected summarizer receives the request without a default-route limit");
   }
   const nativeCompact = await fetch(`${base}/responses/compact`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "gpt-working-native-fixture", stream: false, input: largeInput }), signal: AbortSignal.timeout(10_000) });
@@ -300,16 +299,16 @@ test("ordinary generation crosses retired local ceilings while compaction remain
   assert.ok(failoverSize.estimatedTokens > entries[4].workingInputLimits.generation.maxEstimatedTokens);
   assert.ok(failoverSize.textBytes > entries[4].workingInputLimits.generation.maxTextBytes);
 
-  const beforeMalformedIdentity = upstreamRequests.length;
-  const malformedIdentity = await fetch(`${base}/responses`, {
+  // Without cumulative metadata, the default route does not inspect native
+  // budget identity and follows its ordinary provider path.
+  const beforeUnguardedIdentity = upstreamRequests.length;
+  const unguardedIdentity = await fetch(`${base}/responses`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...nativeFixtures[0], "thread-id": "invalid" },
     body: JSON.stringify({ model: "opencode-go/deepseek-v4.1-flash", stream: false, input: [text("small")] }),
     signal: AbortSignal.timeout(10_000),
   });
-  const malformedIdentityBody = await malformedIdentity.json();
-  assert.equal(malformedIdentity.status, 400, JSON.stringify(malformedIdentityBody));
-  assert.equal(malformedIdentityBody.error.code, "router_resource_budget_exceeded");
-  assert.match(malformedIdentityBody.error.message, /native execution scope/);
-  assert.equal(upstreamRequests.length, beforeMalformedIdentity, "guarded identity is refused before provider transport");
+  const unguardedIdentityBody = await unguardedIdentity.json();
+  assert.equal(unguardedIdentity.status, 200, JSON.stringify(unguardedIdentityBody));
+  assert.equal(upstreamRequests.length, beforeUnguardedIdentity + 1);
 });

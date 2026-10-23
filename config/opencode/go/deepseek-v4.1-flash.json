@@ -27,20 +27,6 @@
       ],
       "contextWindow": 1000000,
       "autoCompact": 150000,
-      "workingInputLimits": {
-        "generation": {
-          "maxEstimatedTokens": 200000,
-          "maxTextBytes": 1048576
-        },
-        "compaction": {
-          "maxEstimatedTokens": 1000000,
-          "maxTextBytes": 4194304
-        },
-        "cumulative": {
-          "maxAttempts": 60,
-          "maxInputTokens": 10000000
-        }
-      },
       "inputModalities": [
         "text",
         "image"

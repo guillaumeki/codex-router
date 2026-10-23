@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { openPort } from "./port-pool.mjs";
 import { bridgeBudgetIdentity, nativeBudgetIdentity } from "../src/native-budget-identity.mjs";
+import { readRegistryDocument } from "../src/model-registry.mjs";
 import { CumulativeUsageAdmission } from "../src/usage-events.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,6 +16,11 @@ const internalKey = "test-cumulative-forwarder-internal-key-with-length";
 const nativeHeaders = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url))).requests[0];
 const identity = nativeBudgetIdentity(nativeHeaders);
 const limits = { maxAttempts: 60, maxInputTokens: 10_000_000 };
+const testWorkingInputLimits = {
+  generation: { maxEstimatedTokens: 200_000, maxTextBytes: 1_048_576 },
+  compaction: { maxEstimatedTokens: 1_000_000, maxTextBytes: 4_194_304 },
+  cumulative: limits,
+};
 const budgetHeaders = (requestId = "actual-forwarder:1") => bridgeBudgetIdentity(
   { workingInputLimits: { cumulative: limits } }, { headers: nativeHeaders, codexRouterRequestId: requestId }, {},
 ).extra_headers;
@@ -25,6 +31,15 @@ const rows = (state) => {
 
 async function fixture(t, { seed = 0, pooled = false, reply, corrupt = false } = {}) {
   const state = mkdtempSync(path.join(os.tmpdir(), "cumulative-forwarder-"));
+  const registryPath = path.join(state, "registry.json");
+  const registry = readRegistryDocument(path.join(root, "config"));
+  const policyIndex = registry.models.findIndex(({ slug }) => slug === "opencode-go/deepseek-v4.1-flash");
+  assert.notEqual(policyIndex, -1);
+  assert.equal(registry.models[policyIndex].workingInputLimits, undefined);
+  const models = registry.models.map((model, index) => index === policyIndex
+    ? { ...model, workingInputLimits: testWorkingInputLimits }
+    : model);
+  writeFileSync(registryPath, `${JSON.stringify({ ...registry, models }, null, 2)}\n`);
   const file = path.join(state, "usage-events.jsonl");
   if (corrupt) mkdirSync(file);
   if (seed) {
@@ -54,7 +69,8 @@ async function fixture(t, { seed = 0, pooled = false, reply, corrupt = false } =
   const port = await openPort();
   const env = { ...process.env, CODEX_HOME: path.join(state, "codex"), MODEL_ROUTER_TARGET: "codex",
     MODEL_ROUTER_INTERNAL_KEY: internalKey, MODEL_ROUTER_API_PORT: String(port), MODEL_ROUTER_STATE_DIR: state,
-    CODEX_ROUTER_STATE_DIR: state, MODEL_ROUTER_QUIET: "1", MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
+    CODEX_ROUTER_STATE_DIR: state, MODEL_ROUTER_REGISTRY: registryPath, MODEL_ROUTER_QUIET: "1",
+    MODEL_ROUTER_PROVIDER_CREDENTIAL_STORE: credentialStorePath,
     MODEL_ROUTER_API_KEY_POOL_PATH: poolStatePath, OPENCODE_API_KEY: "LOCAL_POOL_ONE", OPENCODE_GO_API_KEY: "LOCAL_POOL_TWO",
     OPENCODE_GO_BASE_URL: `http://127.0.0.1:${upstream.address().port}/v1` };
   let child; let errors = "";
