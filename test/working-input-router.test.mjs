@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -34,21 +34,6 @@ async function waitForReady(base, child) {
   throw new Error(`Router did not become ready: ${child.testErrors()}`);
 }
 
-function usageEvents(stateDir) {
-  const file = path.join(stateDir, "usage-events.jsonl");
-  return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map(JSON.parse) : [];
-}
-
-async function waitForUsageEvents(stateDir, count) {
-  const deadline = Date.now() + 5_000;
-  while (Date.now() < deadline) {
-    const rows = usageEvents(stateDir);
-    if (rows.length >= count) return rows;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Usage ledger did not record ${count} requests.`);
-}
-
 test("native compaction intent validates observed root, Desktop and worker scope", () => {
   const fixtures = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url)));
   assert.equal(nativeCompactionIntent({}), false);
@@ -66,7 +51,7 @@ test("native compaction intent validates observed root, Desktop and worker scope
   }
 });
 
-test("route working input limits reject before transport and preserve admitted turns and bounded compaction", { timeout: 60_000 }, async (t) => {
+test("ordinary generation crosses retired local ceilings while compaction remains bounded", { timeout: 60_000 }, async (t) => {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "working-input-router-"));
   const upstreamRequests = [];
   let emptyOnce = false;
@@ -176,24 +161,32 @@ test("route working input limits reject before transport and preserve admitted t
     assert.equal(result.body.error.type, "resource_budget_error");
     assert.equal(upstreamRequests.length, before, "local denial must send zero upstream requests");
   };
+  const assertGenerationAdmitted = async (index, extra, headers = {}) => {
+    const before = upstreamRequests.length;
+    const result = await send(index, extra, headers);
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(upstreamRequests.length, before + 1);
+    return requestInputSize(JSON.stringify(upstreamRequests.at(-1)), {
+      maxTokensPerImage: maxImageTokensForRoute(entries[index]),
+    });
+  };
   const text = (content) => ({ type: "message", role: "user", content });
   const history = [text("old context ".repeat(3_000)), text("continue")];
   for (const headers of [{}, { "x-openai-subagent": "child-1" }]) {
-    await reject(0, { input: history }, headers);
-    await reject(0, { instructions: "界".repeat(10_000) }, headers);
-    await reject(0, { tools: [{ type: "function", name: "read", description: "界".repeat(10_000), parameters: { type: "object" } }] }, headers);
-    await reject(0, { input: [
+    const size = await assertGenerationAdmitted(0, { input: history }, headers);
+    assert.ok(size.estimatedTokens > limits.generation.maxEstimatedTokens, "generation crosses the retired estimate");
+    assert.ok(size.textBytes > limits.generation.maxTextBytes, "generation crosses the retired byte ceiling");
+    await assertGenerationAdmitted(0, { instructions: "界".repeat(10_000) }, headers);
+    await assertGenerationAdmitted(0, { tools: [{ type: "function", name: "read", description: "界".repeat(10_000), parameters: { type: "object" } }] }, headers);
+    await assertGenerationAdmitted(0, { input: [
       { type: "function_call", name: "read", call_id: "call-pending", arguments: "{}" },
       { type: "function_call_output", call_id: "call-pending", output: "界".repeat(10_000) },
     ] }, headers);
-    // Independent token and UTF-8 byte ceilings, including on small requests.
-    await reject(1, { instructions: "x".repeat(8_000) }, headers);
-    await reject(2, { instructions: "界".repeat(2_000) }, headers);
+    const tokenOnly = await assertGenerationAdmitted(1, { instructions: "x".repeat(8_000) }, headers);
+    assert.ok(tokenOnly.estimatedTokens > entries[1].workingInputLimits.generation.maxEstimatedTokens);
+    const bytesOnly = await assertGenerationAdmitted(2, { instructions: "界".repeat(2_000) }, headers);
+    assert.ok(bytesOnly.textBytes > entries[2].workingInputLimits.generation.maxTextBytes);
   }
-  const deniedRows = await waitForUsageEvents(stateDir, 12);
-  assert.equal(deniedRows.length, 12);
-  assert.ok(deniedRows.every((row) => row.status === 400 && row.inputTokens === undefined && row.responseStartMs === undefined),
-    "local refusal never invents billed tokens or upstream latency");
   const allowed = { input: [text("small inherited history"), text("continue")], ...options };
   const result = await send(0, allowed);
   assert.equal(result.status, 200, JSON.stringify(result.body));
@@ -201,16 +194,6 @@ test("route working input limits reject before transport and preserve admitted t
   for (const field of ["input", "instructions", "tools", "stream"]) {
     assert.deepEqual(forwarded[field], allowed[field], `allowed ${field} is unchanged`);
   }
-  // Exact equality admits; reducing either ceiling by one refuses the same bytes.
-  const measured = requestInputSize(JSON.stringify(forwarded), { maxTokensPerImage: maxImageTokensForRoute(entries[0]) });
-  const exactBytes = { ...allowed, instructions: options.instructions + "x".repeat(20_000 - measured.textBytes) };
-  assert.equal((await send(0, exactBytes)).status, 200);
-  await reject(0, { ...exactBytes, instructions: exactBytes.instructions + "x" });
-  assert.equal((await send(1, allowed)).status, 200);
-  const tokenMeasured = requestInputSize(JSON.stringify(upstreamRequests.at(-1)), { maxTokensPerImage: maxImageTokensForRoute(entries[1]) });
-  const exactTokens = { ...allowed, instructions: options.instructions + "x".repeat(6_600 - tokenMeasured.textBytes) };
-  assert.equal((await send(1, exactTokens)).status, 200);
-  await reject(1, { ...exactTokens, instructions: exactTokens.instructions + "x" });
   // No configured policy means no new ceiling, including the native path.
   assert.equal((await send(3, { input: history })).status, 200);
   const native = await fetch(`${base}/responses`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -221,13 +204,18 @@ test("route working input limits reject before transport and preserve admitted t
   const beforeRetry = upstreamRequests.length;
   const replay = await fetch(`${base}/responses`, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: entries[0].slug, input: "hello", stream: true }), signal: AbortSignal.timeout(10_000),
+    body: JSON.stringify({ model: entries[0].slug, input: history, stream: true }), signal: AbortSignal.timeout(10_000),
   });
   const replayBody = await replay.text();
   assert.equal(replay.status, 200, replayBody);
   assert.match(replayBody, /verified/);
   assert.equal(upstreamRequests.length, beforeRetry + 2, "empty completion retries once");
   assert.deepEqual(upstreamRequests.at(-1), upstreamRequests.at(-2), "replay preserves admitted bytes");
+  const retrySize = requestInputSize(JSON.stringify(upstreamRequests.at(-1)), {
+    maxTokensPerImage: maxImageTokensForRoute(entries[0]),
+  });
+  assert.ok(retrySize.estimatedTokens > limits.generation.maxEstimatedTokens);
+  assert.ok(retrySize.textBytes > limits.generation.maxTextBytes);
 
   // Native automatic compaction uses ordinary /responses, with no body trigger.
   // Its validated transport intent must survive replay and failover as well.
@@ -239,10 +227,16 @@ test("route working input limits reject before transport and preserve admitted t
   const admittedCompact = await send(4, { input: nativeHistory }, compactHeaders);
   assert.equal(admittedCompact.status, 200, JSON.stringify(admittedCompact.body));
   assert.equal(upstreamRequests.length, beforeNativeCompact + 1);
-  await reject(4, { input: nativeHistory }, nativeFixtures[9]);
-  await reject(4, { input: nativeHistory, request_kind: "compaction" });
+  const largeNativeTurn = await assertGenerationAdmitted(4, { input: nativeHistory }, nativeFixtures[9]);
+  assert.ok(largeNativeTurn.estimatedTokens > entries[4].workingInputLimits.generation.maxEstimatedTokens);
+  const overCompactInput = [text("x".repeat(4_300_000))];
+  const beforeBodySpoof = upstreamRequests.length;
+  const bodySpoof = await send(4, { input: overCompactInput, request_kind: "compaction" });
+  assert.equal(bodySpoof.status, 200, JSON.stringify(bodySpoof.body));
+  assert.equal(upstreamRequests.length, beforeBodySpoof + 1,
+    "a body field does not select the authenticated compaction allowance");
   await reject(4, { input: nativeHistory }, { ...compactHeaders, "thread-id": "invalid" });
-  await reject(4, { input: [text("x".repeat(4_300_000))] }, compactHeaders);
+  await reject(4, { input: overCompactInput }, compactHeaders);
   emptyOnce = true;
   const beforeCompactRetry = upstreamRequests.length;
   const compactReplay = await fetch(`${base}/responses`, {
@@ -276,7 +270,7 @@ test("route working input limits reject before transport and preserve admitted t
   writeFileSync(path.join(stateDir, "provider-cooldowns.json"), JSON.stringify({
     "opencode-go": { until: new Date(Date.now() + 60_000).toISOString(), reason: "out_of_usage" },
   }));
-  const largeInput = [text("x".repeat(4_300_000))];
+  const largeInput = overCompactInput;
   for (const endpoint of ["/responses/compact", "/responses"]) {
     const before = upstreamRequests.length;
     const result = await fetch(`${base}${endpoint}`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -293,12 +287,29 @@ test("route working input limits reject before transport and preserve admitted t
   assert.equal(nativeCompact.status, 200, await nativeCompact.text());
   writeFileSync(path.join(stateDir, "provider-cooldowns.json"), "{}");
   writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true, chain: ["opencode-go/deepseek-v4.1-flash"] }));
-  // A quota response can select a limited destination. Its rebuilt request is
-  // denied locally before that destination's transport, with no further hop.
+  // A quota response can select a limited destination. Ordinary generation is
+  // still forwarded after the guard's input preparation.
   quotaOnce = true;
   const beforeFailover = upstreamRequests.length;
-  const failedOver = await send(3, { instructions: "x".repeat(700_000) });
-  assert.equal(failedOver.status, 400, JSON.stringify(failedOver.body));
-  assert.equal(failedOver.body.error.code, "router_resource_budget_exceeded");
-  assert.equal(upstreamRequests.length, beforeFailover + 1, "only the original quota request is sent");
+  const failedOver = await send(3, { instructions: "x".repeat(1_100_000) }, nativeFixtures[0]);
+  assert.equal(failedOver.status, 200, JSON.stringify(failedOver.body));
+  assert.equal(upstreamRequests.length, beforeFailover + 2);
+  const failoverSize = requestInputSize(JSON.stringify(upstreamRequests.at(-1)), {
+    maxTokensPerImage: maxImageTokensForRoute(entries[4]),
+  });
+  assert.ok(failoverSize.estimatedTokens > entries[4].workingInputLimits.generation.maxEstimatedTokens);
+  assert.ok(failoverSize.textBytes > entries[4].workingInputLimits.generation.maxTextBytes);
+
+  const beforeMalformedIdentity = upstreamRequests.length;
+  const malformedIdentity = await fetch(`${base}/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...nativeFixtures[0], "thread-id": "invalid" },
+    body: JSON.stringify({ model: "opencode-go/deepseek-v4.1-flash", stream: false, input: [text("small")] }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const malformedIdentityBody = await malformedIdentity.json();
+  assert.equal(malformedIdentity.status, 400, JSON.stringify(malformedIdentityBody));
+  assert.equal(malformedIdentityBody.error.code, "router_resource_budget_exceeded");
+  assert.match(malformedIdentityBody.error.message, /native execution scope/);
+  assert.equal(upstreamRequests.length, beforeMalformedIdentity, "guarded identity is refused before provider transport");
 });

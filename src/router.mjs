@@ -423,10 +423,11 @@ function isGrokOauthRoute(route) {
   return Boolean(route) && canonicalProviderId(route.provider) === "grok-oauth";
 }
 
-// Admit the final provider-bound bytes, including on child, replay and failover
-// paths. Compaction has its own finite allowance; native traffic has no route.
+// Enforce only the dedicated compaction allowance at the final provider-bound
+// bytes, including replay and failover paths. Ordinary generation stays under
+// native client auto-compaction and cumulative limits.
 function assertWorkingInputLimit(route, body, { compaction = false } = {}) {
-  if (route?.workingInputLimits === undefined) return;
+  if (!compaction || route?.workingInputLimits === undefined) return;
   const limits = route.workingInputLimits;
   const validPair = (pair) => pair && typeof pair === "object" && !Array.isArray(pair) &&
     Number.isSafeInteger(pair.maxEstimatedTokens) && pair.maxEstimatedTokens > 0 &&
@@ -434,10 +435,10 @@ function assertWorkingInputLimit(route, body, { compaction = false } = {}) {
   const valid = limits && typeof limits === "object" && !Array.isArray(limits) &&
     validPair(limits.generation) && validPair(limits.compaction);
   const size = requestInputSize(body, { maxTokensPerImage: maxImageTokensForRoute(route) });
-  const bound = valid ? limits[compaction ? "compaction" : "generation"] : undefined;
+  const bound = valid ? limits.compaction : undefined;
   if (bound && size.estimatedTokens <= bound.maxEstimatedTokens && size.textBytes <= bound.maxTextBytes) return;
   const error = new Error(bound
-    ? `The provider-bound ${compaction ? "compaction" : "generation"} request exceeds this route's working input limit. Reduce the context or compact within the configured compaction limit.`
+    ? "The provider-bound compaction request exceeds this route's working input limit. Reduce the context or compact within the configured compaction limit."
     : "The route has invalid working input limits; correct its configuration before retrying.");
   error.status = 400;
   error.code = "router_resource_budget_exceeded";
