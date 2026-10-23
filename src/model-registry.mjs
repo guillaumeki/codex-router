@@ -19,6 +19,7 @@ import { instructionOverlayExists } from "./instruction-overlays.mjs";
 import { SOURCE_ROOT } from "./paths.mjs";
 import { officialModelDisplayName, readUserModels } from "./user-models.mjs";
 import { curatableRequestProfile, requestProfileKnown } from "./request-profiles.mjs";
+import { reasoningTagPolicyProblem } from "./reasoning-tag-policy.mjs";
 import { VERTEX_ADAPTERS } from "./vertex-adapters.mjs";
 
 export const REGISTRY_PATH =
@@ -680,6 +681,8 @@ function modelProblem(model, providers, slugs, gatewayModels) {
       return `model ${model.slug} has invalid workingInputLimits`;
     }
   }
+  const tagPolicyProblem = reasoningTagPolicyProblem(model);
+  if (tagPolicyProblem) return `model ${model.slug} ${tagPolicyProblem}`;
   if (model.goalContinuationGuard !== undefined && typeof model.goalContinuationGuard !== "boolean") {
     return `model ${model.slug} has an invalid goalContinuationGuard flag`;
   }
