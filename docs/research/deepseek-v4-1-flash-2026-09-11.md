@@ -194,26 +194,33 @@ the native subagent probe have not been run for these routes.
 
 The Go Flash route keeps `contextWindow: 1000000` and uses `autoCompact: 150000`.
 This is a local operational trial, not a claim about a changed provider capacity.
-Its opt-in `workingInputLimits` metadata has two required objects, `generation`
-and `compaction`, each with positive safe-integer `maxEstimatedTokens` and
-`maxTextBytes` fields. Generation uses 200,000 estimated tokens and 1,048,576
-text bytes; compaction uses 1,000,000 estimated tokens and 4,194,304 text bytes.
-Missing metadata preserves existing route behavior. Invalid configured metadata
-is rejected by the registry; the transport boundary also fails closed if an
-invalid policy reaches it. Zero does not disable a configured bound.
+Codex uses the threshold to initiate native auto-compaction, while its 2K
+tool-result retention remains a separate client control. The opt-in
+`workingInputLimits` metadata still has two required objects, `generation` and
+`compaction`, each with positive safe-integer `maxEstimatedTokens` and
+`maxTextBytes` fields. The router keeps configured generation pairs valid for
+metadata compatibility, but ordinary generation has no per-request size veto;
+the retired value is not a routing or admission limit.
 
-Admission measures the complete serialized provider-bound request, including
-instructions, tool schemas, and normalized inherited history, after existing
-image and tool-result preparation. Known invisible ciphertext and actual image
-reference bytes are excluded from textual JSON; images still contribute the
-existing per-route token bound. The bytes/3.3 estimate is not an exact tokenizer
-or a provider billing count. Equality is admitted; exceeding either bound returns
-HTTP 400 `resource_budget_error` / `router_resource_budget_exceeded` before that
-transport sends any bytes. The rejection does not initiate a retry or failover.
-Each destination and replay is checked at the same transport boundary. The
-requested route also owns a compaction preflight before summarizer selection,
-so cooldown or a different configured fallback cannot bypass its allowance;
-this applies to V1 and V2 compaction and leaves unguarded native traffic alone.
+The finite compaction pair uses 1,000,000 estimated tokens and 4,194,304 text
+bytes. Missing metadata preserves existing route behavior. Invalid configured
+metadata is rejected by the registry; the compaction transport boundary also
+fails closed if an invalid policy reaches it. Zero does not disable a
+configured bound.
+
+Compaction admission measures the complete serialized provider-bound request,
+including instructions, tool schemas, and normalized inherited history, after
+existing image and tool-result preparation. Known invisible ciphertext and
+actual image reference bytes are excluded from textual JSON; images still
+contribute the existing per-route token bound. The bytes/3.3 estimate is not an
+exact tokenizer or a provider billing count. Equality is admitted; exceeding
+either compaction bound returns HTTP 400 `resource_budget_error` /
+`router_resource_budget_exceeded` before that transport sends any bytes. The
+rejection does not initiate a retry or failover. Each destination and replay is
+checked at the same transport boundary. The requested route also owns a
+compaction preflight before summarizer selection, so cooldown or a different
+configured fallback cannot bypass its allowance; this applies to V1 and V2
+compaction and leaves unguarded native traffic alone.
 
 Both `/responses/compact` and a terminal native V2 `compaction_trigger` use the
 separate finite compaction allowance so older history can be summarized. History
