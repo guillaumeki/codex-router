@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import http from "node:http";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -10,6 +10,11 @@ import { fileURLToPath } from "node:url";
 import { openPort } from "./port-pool.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const nativeHeaders = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url))).requests[0];
+const { bridgeBudgetIdentity } = await import("../src/native-budget-identity.mjs");
+const budgetHeaders = bridgeBudgetIdentity({ workingInputLimits: { cumulative: {} } },
+  { headers: nativeHeaders, codexRouterRequestId: "replay-test:1" }, {}).extra_headers;
+
 const internalKey = "test-go-json-replay-internal-key-with-length";
 
 test("Go JSON response keeps its headers and bytes, then replays reasoning on the next tool turn", async () => {
@@ -59,7 +64,7 @@ test("Go JSON response keeps its headers and bytes, then replays reasoning on th
     }
     const response = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${internalKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${internalKey}`, "Content-Type": "application/json", ...budgetHeaders },
       body: JSON.stringify({ model: "opencode-go-deepseek-v4-1-flash", messages: [{ role: "user", content: "test" }] }),
     });
     assert.equal(response.status, 200, await response.clone().text());
@@ -67,7 +72,7 @@ test("Go JSON response keeps its headers and bytes, then replays reasoning on th
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), body);
     const followUp = await fetch(`${base}/v1/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${internalKey}`, "Content-Type": "application/json" },
+      headers: { Authorization: `Bearer ${internalKey}`, "Content-Type": "application/json", ...budgetHeaders },
       body: JSON.stringify({
         model: "opencode-go-deepseek-v4-1-flash",
         messages: [

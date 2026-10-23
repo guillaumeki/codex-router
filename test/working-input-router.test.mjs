@@ -94,7 +94,7 @@ test("route working input limits reject before transport and preserve admitted t
     undefined,
   ].map((workingInputLimits, index) => ({
     ...userModelEntry({ providerId: "custom", upstreamId: `working-input-${index}`, priority: 900 + index,
-      metadata: { autoCompact: 1_000, ...(workingInputLimits ? { workingInputLimits } : {}) } }),
+      metadata: { autoCompact: 1_000, ...(index === 3 ? { contextWindow: 4_000_000 } : {}), ...(workingInputLimits ? { workingInputLimits } : {}) } }),
     endpoint: { baseUrl: `${upstreamBase}/v1`, protocol: "openai-responses", keyless: true },
   }));
   const modelsFile = path.join(stateDir, "user-models.json");
@@ -218,6 +218,29 @@ test("route working input limits reject before transport and preserve admitted t
     assert.equal(upstreamRequests.length, before + 1, "old context reaches bounded summarizer");
     await reject(0, compact([text("界".repeat(150_000))]), {}, endpoint);
   }
+  // A requested guarded Go route owns its allowance even when a different,
+  // larger configured summarizer is selected because Go is cooling down.
+  writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true, chain: [entries[3].slug] }));
+  writeFileSync(path.join(stateDir, "provider-cooldowns.json"), JSON.stringify({
+    "opencode-go": { until: new Date(Date.now() + 60_000).toISOString(), reason: "out_of_usage" },
+  }));
+  const largeInput = [text("x".repeat(4_300_000))];
+  for (const endpoint of ["/responses/compact", "/responses"]) {
+    const before = upstreamRequests.length;
+    const result = await fetch(`${base}${endpoint}`, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "opencode-go/deepseek-v4.1-flash", stream: false,
+        input: endpoint === "/responses" ? [...largeInput, { type: "compaction_trigger" }] : largeInput }),
+      signal: AbortSignal.timeout(10_000) });
+    const body = await result.json();
+    assert.equal(result.status, 400, JSON.stringify(body));
+    assert.equal(body.error.code, "router_resource_budget_exceeded");
+    assert.equal(upstreamRequests.length, before, "requested compaction budget must deny before another summarizer sends");
+  }
+  const nativeCompact = await fetch(`${base}/responses/compact`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "gpt-working-native-fixture", stream: false, input: largeInput }), signal: AbortSignal.timeout(10_000) });
+  assert.equal(nativeCompact.status, 200, await nativeCompact.text());
+  writeFileSync(path.join(stateDir, "provider-cooldowns.json"), "{}");
+  writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true, chain: ["opencode-go/deepseek-v4.1-flash"] }));
   // A quota response can select a limited destination. Its rebuilt request is
   // denied locally before that destination's transport, with no further hop.
   quotaOnce = true;

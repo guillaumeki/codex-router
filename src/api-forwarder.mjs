@@ -1,3 +1,8 @@
+import { Readable } from "node:stream";
+import { CumulativeUsageAdmission } from "./usage-events.mjs";
+import { ResponseUsageTransform, requestInputSize } from "./response-usage.mjs";
+import { maxImageTokensForRoute } from "./prompt-image-usage.mjs";
+import { cumulativeBudgetEnabled, internalBudgetIdentity } from "./native-budget-identity.mjs";
 import { normalizeAzureOpenAIResponsesRequest } from "./azure-openai-compat.mjs";
 import http from "node:http";
 import {
@@ -1074,6 +1079,7 @@ function normalizeBody(buffer, contentType, route) {
     throw error;
   }
 
+  if (cumulativeBudgetEnabled(model)) delete payload.extra_headers;
   payload.model = model.upstreamModel;
   // Embeddings and Decisions have their own wire contracts. Keep every
   // provider-specific field unchanged and never send either through a chat
@@ -1924,6 +1930,54 @@ async function acquireGenericWebSocketResponses(normalized, controller, requestP
   return { result };
 }
 
+const cumulativeAdmission = new CumulativeUsageAdmission();
+
+// Only api-forwarder sees every actual provider send, including pool retries
+// and router replays. The router -> gateway hop is not a provider attempt.
+async function sendProviderAttempt(normalized, budgetScope, target, init) {
+  if (!budgetScope) return fetch(target, init);
+  const ticket = cumulativeAdmission.reserve({
+    ...budgetScope,
+    estimatedInput: Math.max(1, requestInputSize(init.body, {
+      maxTokensPerImage: maxImageTokensForRoute(normalized.model),
+    }).estimatedTokens),
+    limits: normalized.model.workingInputLimits.cumulative,
+  });
+  // No await between the synchronous check+durable reservation and fetch.
+  let upstream;
+  try { upstream = await fetch(target, init); }
+  catch (error) { cumulativeAdmission.settle(ticket); throw error; }
+  if (!upstream.body) { cumulativeAdmission.settle(ticket); return upstream; }
+  let observedInput;
+  let cachedInput;
+  const noteUsage = (payload) => {
+    const usage = payload?.usage ?? payload?.response?.usage;
+    const input = usage?.input_tokens ?? usage?.prompt_tokens;
+    const cached = usage?.input_tokens_details?.cached_tokens ??
+      usage?.prompt_tokens_details?.cached_tokens ?? usage?.prompt_cache_hit_tokens;
+    if (Number.isSafeInteger(input) && input >= 0) observedInput = Math.max(observedInput ?? 0, input);
+    if (Number.isSafeInteger(cached) && cached >= 0) cachedInput = Math.max(cachedInput ?? 0, cached);
+  };
+  const settle = () => cumulativeAdmission.settle(ticket, { observedInput, cachedInput });
+  class AdmissionUsageTransform extends ResponseUsageTransform {
+    _flush(callback) {
+      super._flush((error) => {
+        if (error) { callback(error); return; }
+        try { settle(); callback(); } catch (failure) { callback(failure); }
+      });
+    }
+    _destroy(error, callback) {
+      try { settle(); callback(error); } catch (failure) { callback(failure); }
+    }
+  }
+  const observer = new AdmissionUsageTransform(upstream.headers.get("content-type"), { onEvent: noteUsage });
+  const source = Readable.fromWeb(upstream.body);
+  source.on("error", (error) => observer.destroy(error));
+  observer.once("close", () => source.destroy());
+  const body = Readable.toWeb(source.pipe(observer));
+  return new Response(body, { status: upstream.status, statusText: upstream.statusText, headers: upstream.headers });
+}
+
 async function handleRequest(request, response) {
   const startedAt = Date.now();
   const requestUrl = new URL(
@@ -1954,6 +2008,8 @@ async function handleRequest(request, response) {
 
   const original = await readRequestBody(request);
   const normalized = normalizeBody(original, request.headers["content-type"], route);
+  const budgetScope = cumulativeBudgetEnabled(normalized.model)
+    ? internalBudgetIdentity(request.headers) : undefined;
   const controller = new AbortController();
   request.once("aborted", () => controller.abort());
   response.once("close", () => {
@@ -2135,7 +2191,7 @@ async function handleRequest(request, response) {
           normalized.endpoint,
         );
         let attemptTarget = upstreamTarget(attemptSession, normalized, route, requestUrl.search);
-        const sendAttempt = () => fetch(attemptTarget, {
+        const sendAttempt = () => sendProviderAttempt(normalized, budgetScope, attemptTarget, {
           method: request.method,
           headers: upstreamHeaders(
             request.headers,
@@ -2221,6 +2277,7 @@ async function handleRequest(request, response) {
         };
       },
     });
+    if (pooled.error?.code === "router_resource_budget_exceeded") throw pooled.error;
     const result = pooled.result;
     if (result?.upstreamHeaders) {
       // Plan attempts keep their provider headers separate from the safe error
@@ -2266,7 +2323,7 @@ async function handleRequest(request, response) {
       normalized.endpoint,
     );
     target = upstreamTarget(session, normalized, route, requestUrl.search);
-    upstream = await fetch(target, {
+    upstream = await sendProviderAttempt(normalized, budgetScope, target, {
       method: request.method,
       headers: upstreamHeaders(
         request.headers,
@@ -2313,7 +2370,7 @@ async function handleRequest(request, response) {
       normalized.endpoint,
     );
     target = upstreamTarget(session, normalized, route, requestUrl.search);
-    upstream = await fetch(target, {
+    upstream = await sendProviderAttempt(normalized, budgetScope, target, {
       method: request.method,
       headers: upstreamHeaders(
         request.headers,
@@ -2389,7 +2446,9 @@ const server = http.createServer((request, response) => {
     );
     if (!response.headersSent) {
       writeJson(response, status, {
-        error: transport || {
+        error: error?.code === "router_resource_budget_exceeded" ? {
+          type: "resource_budget_error", code: error.code, message: error.message,
+        } : transport || {
           type: "provider_api_proxy_error",
           message: "The API-provider forwarder could not complete the request.",
         },
