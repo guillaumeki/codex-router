@@ -58,5 +58,48 @@
       "session-id": "01a168dd-be90-7f43-b6ad-0ef8b60f3467",
       "x-codex-turn-metadata": "{\"thread_id\":\"01a168dd-be90-7f43-b6ad-0ef8b60f3467\",\"turn_id\":\"01a168dd-be9b-7c13-90ef-705acd43bc5c\",\"session_id\":\"01a168dd-be90-7f43-b6ad-0ef8b60f3467\",\"request_kind\":\"compaction\",\"root_turn_id\":\"01a168dd-be9b-7c13-90ef-705acd43bc5c\",\"thread_source\":\"user\"}"
     }
+  ],
+  "desktop_provenance": "Bundled /usr/lib/chatgpt/resources/codex 0.159.0-alpha.12.1 isolated app-server to loopback, 2026-10-23. Per source (omitted then agent_created_thread): dynamic tool roundtrip, new root turn, standalone manual compaction. Retains emitted identity fields only. Manual compaction starts its own native turn; automatic compaction fixture above retains its originating turn.",
+  "desktop_requests": [
+    {
+      "thread-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "session-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"thread_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"turn_id\":\"01a1690f-76a5-7773-8df6-50db2100d05e\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a1690f-76a5-7773-8df6-50db2100d05e\"}"
+    },
+    {
+      "thread-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "session-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"thread_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"turn_id\":\"01a1690f-76a5-7773-8df6-50db2100d05e\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a1690f-76a5-7773-8df6-50db2100d05e\"}"
+    },
+    {
+      "thread-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "session-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"thread_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"turn_id\":\"01a1690f-76da-7ee1-8a38-f8e0149ce6bd\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a1690f-76da-7ee1-8a38-f8e0149ce6bd\"}"
+    },
+    {
+      "thread-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "session-id": "01a1690f-7688-72b3-a85c-2511a77648b6",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"thread_id\":\"01a1690f-7688-72b3-a85c-2511a77648b6\",\"turn_id\":\"01a1690f-76f2-7513-abff-0f3a2d422e79\",\"request_kind\":\"compaction\",\"root_turn_id\":\"01a1690f-76f2-7513-abff-0f3a2d422e79\"}"
+    },
+    {
+      "thread-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "session-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"thread_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"turn_id\":\"01a1690f-771f-7b13-9d3c-b1f558a952eb\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a1690f-771f-7b13-9d3c-b1f558a952eb\",\"thread_source\":\"agent_created_thread\"}"
+    },
+    {
+      "thread-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "session-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"thread_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"turn_id\":\"01a1690f-771f-7b13-9d3c-b1f558a952eb\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a1690f-771f-7b13-9d3c-b1f558a952eb\",\"thread_source\":\"agent_created_thread\"}"
+    },
+    {
+      "thread-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "session-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"thread_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"turn_id\":\"01a1690f-7749-7082-b6c2-7e3412ed2d37\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a1690f-7749-7082-b6c2-7e3412ed2d37\",\"thread_source\":\"agent_created_thread\"}"
+    },
+    {
+      "thread-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "session-id": "01a1690f-7707-73c2-9db7-0728e252abdb",
+      "x-codex-turn-metadata": "{\"session_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"thread_id\":\"01a1690f-7707-73c2-9db7-0728e252abdb\",\"turn_id\":\"01a1690f-7762-7482-a74f-9241de15a5e6\",\"request_kind\":\"compaction\",\"root_turn_id\":\"01a1690f-7762-7482-a74f-9241de15a5e6\",\"thread_source\":\"agent_created_thread\"}"
+    }
   ]
 }

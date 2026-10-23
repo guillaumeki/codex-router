@@ -1,0 +1,1 @@
+- Recognize proven bundled Codex Desktop app-server root identity shapes on the guarded DeepSeek route, including agent-created chats, while requiring matching transport identity and preserving turn, lineage, and cumulative-budget checks.
