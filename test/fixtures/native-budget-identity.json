@@ -1,0 +1,62 @@
+{
+  "provenance": "Installed Codex CLI 0.159.2 local-only native transport observations, 2026-10-23; root tool roundtrip/new root turn and completed child followup. Agent names are deliberately omitted. Native automatic compaction observed through full installed LiteLLM proxy; request_kind=compaction keeps thread and turn.",
+  "requests": [
+    {
+      "session-id": "01a168c5-5da6-7dc1-b3e3-935b98bceea5",
+      "thread-id": "01a168c5-5da6-7dc1-b3e3-935b98bceea5",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168c5-5da6-7dc1-b3e3-935b98bceea5\",\"turn_id\":\"01a168c5-5dc3-79b3-9700-63faad85878f\",\"session_id\":\"01a168c5-5da6-7dc1-b3e3-935b98bceea5\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168c5-5dc3-79b3-9700-63faad85878f\",\"thread_source\":\"user\"}"
+    },
+    {
+      "session-id": "01a168c5-5da6-7dc1-b3e3-935b98bceea5",
+      "thread-id": "01a168c5-5da6-7dc1-b3e3-935b98bceea5",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168c5-5da6-7dc1-b3e3-935b98bceea5\",\"turn_id\":\"01a168c5-5dc3-79b3-9700-63faad85878f\",\"session_id\":\"01a168c5-5da6-7dc1-b3e3-935b98bceea5\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168c5-5dc3-79b3-9700-63faad85878f\",\"thread_source\":\"user\"}"
+    },
+    {
+      "session-id": "01a168c5-5da6-7dc1-b3e3-935b98bceea5",
+      "thread-id": "01a168c5-5da6-7dc1-b3e3-935b98bceea5",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168c5-5da6-7dc1-b3e3-935b98bceea5\",\"turn_id\":\"01a168c5-5fa2-7dd2-87cb-7b10f8db8d81\",\"session_id\":\"01a168c5-5da6-7dc1-b3e3-935b98bceea5\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168c5-5fa2-7dd2-87cb-7b10f8db8d81\",\"thread_source\":\"user\"}"
+    },
+    {
+      "session-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "thread-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"session_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"thread_source\":\"user\"}"
+    },
+    {
+      "session-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "thread-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"session_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"thread_source\":\"user\"}"
+    },
+    {
+      "x-codex-parent-thread-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "session-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "thread-id": "01a168cb-1052-7941-8d4b-e9ae0c279869",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168cb-1052-7941-8d4b-e9ae0c279869\",\"turn_id\":\"01a168cb-106a-7652-bfb4-c588338c74f9\",\"session_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"thread_source\":\"subagent\",\"subagent_kind\":\"thread_spawn\",\"parent_thread_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"parent_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\"}"
+    },
+    {
+      "session-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "thread-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"session_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"thread_source\":\"user\"}"
+    },
+    {
+      "session-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "thread-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"session_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"thread_source\":\"user\"}"
+    },
+    {
+      "x-codex-parent-thread-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "session-id": "01a168cb-1008-7d03-9d93-da69918e4884",
+      "thread-id": "01a168cb-1052-7941-8d4b-e9ae0c279869",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168cb-1052-7941-8d4b-e9ae0c279869\",\"turn_id\":\"01a168cb-1287-7720-aea2-a1c484f7942d\",\"session_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\",\"thread_source\":\"subagent\",\"subagent_kind\":\"thread_spawn\",\"parent_thread_id\":\"01a168cb-1008-7d03-9d93-da69918e4884\",\"parent_turn_id\":\"01a168cb-1026-75c1-a1ac-4f1ecaef09e5\"}"
+    },
+    {
+      "thread-id": "01a168dd-be90-7f43-b6ad-0ef8b60f3467",
+      "session-id": "01a168dd-be90-7f43-b6ad-0ef8b60f3467",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168dd-be90-7f43-b6ad-0ef8b60f3467\",\"turn_id\":\"01a168dd-be9b-7c13-90ef-705acd43bc5c\",\"session_id\":\"01a168dd-be90-7f43-b6ad-0ef8b60f3467\",\"request_kind\":\"turn\",\"root_turn_id\":\"01a168dd-be9b-7c13-90ef-705acd43bc5c\",\"thread_source\":\"user\"}"
+    },
+    {
+      "thread-id": "01a168dd-be90-7f43-b6ad-0ef8b60f3467",
+      "session-id": "01a168dd-be90-7f43-b6ad-0ef8b60f3467",
+      "x-codex-turn-metadata": "{\"thread_id\":\"01a168dd-be90-7f43-b6ad-0ef8b60f3467\",\"turn_id\":\"01a168dd-be9b-7c13-90ef-705acd43bc5c\",\"session_id\":\"01a168dd-be90-7f43-b6ad-0ef8b60f3467\",\"request_kind\":\"compaction\",\"root_turn_id\":\"01a168dd-be9b-7c13-90ef-705acd43bc5c\",\"thread_source\":\"user\"}"
+    }
+  ]
+}

@@ -676,7 +676,11 @@ function modelProblem(model, providers, slugs, gatewayModels) {
       Number.isSafeInteger(pair.maxEstimatedTokens) && pair.maxEstimatedTokens > 0 &&
       Number.isSafeInteger(pair.maxTextBytes) && pair.maxTextBytes > 0;
     if (!limits || typeof limits !== "object" || Array.isArray(limits) ||
-        !validPair(limits.generation) || !validPair(limits.compaction)) {
+        !validPair(limits.generation) || !validPair(limits.compaction) ||
+        (limits.cumulative !== undefined &&
+          (model.provider !== "opencode-go" || model.upstreamModel !== "deepseek-v4.1-flash" ||
+           !Number.isSafeInteger(limits.cumulative?.maxAttempts) || limits.cumulative.maxAttempts < 1 || limits.cumulative.maxAttempts > 60 ||
+           !Number.isSafeInteger(limits.cumulative?.maxInputTokens) || limits.cumulative.maxInputTokens < 1 || limits.cumulative.maxInputTokens > 10_000_000))) {
       return `model ${model.slug} has invalid workingInputLimits`;
     }
   }

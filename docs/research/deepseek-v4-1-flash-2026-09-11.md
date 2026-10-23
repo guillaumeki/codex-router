@@ -210,13 +210,91 @@ existing per-route token bound. The bytes/3.3 estimate is not an exact tokenizer
 or a provider billing count. Equality is admitted; exceeding either bound returns
 HTTP 400 `resource_budget_error` / `router_resource_budget_exceeded` before that
 transport sends any bytes. The rejection does not initiate a retry or failover.
-Each destination and replay is checked at the same transport boundary.
+Each destination and replay is checked at the same transport boundary. The
+requested route also owns a compaction preflight before summarizer selection,
+so cooldown or a different configured fallback cannot bypass its allowance;
+this applies to V1 and V2 compaction and leaves unguarded native traffic alone.
 
 Both `/responses/compact` and a terminal native V2 `compaction_trigger` use the
 separate finite compaction allowance so older history can be summarized. History
 above that allowance is refused locally and needs explicit context reduction;
 there is no unbounded compaction exception or silent context-window increase.
 Native OpenAI traffic and routes without this metadata retain existing behavior.
-These checks are per request: stable cumulative allowance across new request or
-family IDs, installed publication, activation, and live acceptance remain separate
-work and are not established by local transport-mock tests.
+These size checks are per request. The partial cumulative native-execution
+boundary is described below; installed publication, activation, and live
+acceptance remain separate work.
+
+### Partial cumulative native execution boundary
+
+The same Go Flash route also opts into `workingInputLimits.cumulative` with
+`maxAttempts: 60` and `maxInputTokens: 10000000`. Both fields are positive safe
+integers, capped at those values; the registry permits this opt-in only for
+opencode Go's `deepseek-v4.1-flash`. Missing cumulative metadata leaves other
+routes unchanged. The guarded route requires native Codex transport identity;
+other clients without that metadata receive a terminal local HTTP 400 on this
+route. Native OpenAI traffic and unguarded routes retain their existing behavior.
+
+Identity follows observed Codex CLI 0.159.2 transport fields, not agent names,
+session names, prompt text, or model-supplied headers. A root execution uses its
+stable `(thread_id, turn_id)` pair, including tool round trips and native
+`request_kind: compaction` work in the same execution. A later root turn
+in the same chat starts a separate allowance. An explicitly classified
+`thread_source: subagent`, `subagent_kind: thread_spawn` worker uses `thread_id`
+for its lifetime, including a follow-up after completion. The parent lineage is
+validated; the shared `session_id` is not a worker discriminator. Missing,
+contradictory, unsupported, or ambiguous identities fail closed in this scope.
+The checked-in fixture retains only identity fields from actual local native
+observations, with agent names omitted.
+
+The router replaces caller-supplied `extra_headers` on this route with its own
+vetted identity and existing instance-scoped request ID. LiteLLM carries those
+standard headers to the authenticated internal API forwarder. The forwarder
+consumes them before its existing `x-codex-*` external-header denylist, and
+removes any direct `extra_headers` body field on the guarded route. Native
+identity and internal control headers must never reach the external provider.
+The router-to-gateway hop does not count as a provider attempt.
+
+The API forwarder is the single admission writer for actual provider sends,
+including credential-pool retries and outer router replays. Before each fetch,
+it synchronously checks the scope totals including outstanding requests, appends
+a reservation to the existing `usage-events.jsonl`, fsyncs it, and consumes the
+reservation in memory. No await separates the check/reservation from fetch.
+Each row joins the existing router request ID and a monotonic attempt ordinal.
+Guarded sends refuse upstream HTTP redirects and retain the
+reservation; configure the final API endpoint. They never send to the redirect
+target. Unguarded routes preserve their existing redirect behavior.
+Failure to read, recover, append, or fsync accounting denies transport with a
+terminal `router_resource_budget_exceeded`; that refusal is neither retried nor
+failed over. It is not a provider quota signal. The forwarder emits the resource-budget
+error code; the installed LiteLLM proxy normalizes it to public
+`invalid_request_error` / code `400`, retaining HTTP 400 and the bounded
+explanation. Full native CLI loopbacks verify that both exhausted allowance and
+unreadable accounting terminate without a router retry or failover.
+
+A reservation charges the final provider-bound request's input estimate. An
+outcome records observed input, including cached input, and charges any excess
+over the estimate. The larger value is retained; lower reported usage, unknown
+usage, failures, cancellations, and possibly-sent requests never refund a
+reservation. Outcomes are recorded once. A crashed process's unmatched
+reservation stays charged after restart. Duplicate or out-of-order persisted
+outcomes and malformed or truncated logs fail closed. Recovery reads at most
+256 MiB of log with a 1 MiB maximum row; exceeding either bound also refuses the
+guarded route, rather than silently discarding history. Admission records omit
+the fields used by completed-request and billed-usage aggregates.
+
+The first successful admission writes an explicit enforcement boundary into the
+existing log. Older display telemetry cannot prove historic attempts or assign
+them to native executions and is not backfilled. The guarantee starts at this
+boundary and relies on retaining this log intact; deleting or replacing it loses
+that evidence. The estimate is the existing bytes/3.3 plus bounded-image input
+estimate, not an exact tokenizer. Consequently this is a conservative local
+estimated-and-observed allowance, **not an exact 10-million-token provider billing
+ceiling**. Concurrent requests can have outstanding estimates before their
+larger observed counts arrive.
+
+This is intentionally PARTIAL: cumulative assignment-wide enforcement across
+replacement workers with new thread IDs remains OPEN. The native identity bridge,
+actual tool round-trip continuity, authenticated internal hop, provider-header
+absence, persistence, pool retry, restart, and zero-send refusal have local
+loopback evidence. Installed activation, host deployment, and live provider
+acceptance are separate OPEN rows owned by the delivery task.

@@ -1,3 +1,4 @@
+import { bridgeBudgetIdentity } from "./native-budget-identity.mjs";
 import { resolveGenerationOutcome } from "./response-outcome.mjs";
 import { readFileSync } from "node:fs";
 import http from "node:http";
@@ -661,6 +662,7 @@ function beginRequestActivity({ request, response, controller } = {}) {
   const requestId = ++requestSequence;
   // Use the observer's instance-scoped ID so usage joins /activity across restarts.
   const requestIdText = progress.requestId;
+  if (request) request.codexRouterRequestId = requestIdText;
   const startedAt = Date.now();
   let finished = false;
   let deadlineExceeded = false;
@@ -3186,7 +3188,7 @@ async function summarizeWith(
   // is unrelated to the compaction body.
   if (rejectsWebSearchOptions(route)) delete body.web_search_options;
   const searchCompatibility = routedSearchCompatibility(body, route);
-  const serialized = JSON.stringify(searchCompatibility.payload);
+  const serialized = JSON.stringify(bridgeBudgetIdentity(route, request, searchCompatibility.payload));
   // Candidate capability may depend on a sidecar credential or binding that
   // changed while image bridging was in flight. Preserve both the mode used
   // to construct this exact body and the live mode at the send boundary: a
@@ -4143,7 +4145,7 @@ async function buildRoutedRequest({ request, payload, route, agedInput }) {
     { namespaces: flattenedNamespaces },
   );
   return {
-    body: Buffer.from(JSON.stringify(routed), "utf8"),
+    body: Buffer.from(JSON.stringify(bridgeBudgetIdentity(route, request, routed)), "utf8"),
     usageDiagnostics,
     target: routedResponsesTarget(route),
     headers: routedHeaders(),
@@ -4674,6 +4676,13 @@ async function handleResponses(request, response, requestUrl) {
     // terminal trigger. Detect the protocol shape before route dispatch so the
     // native path can also preserve the full tool results being summarized.
     const compactV2 = isRemoteCompactV2Trigger(payload);
+    // The requested route owns the compaction allowance even when cooldown or
+    // failover selects a different summarizer. Check before selection, replay
+    // normalization, image bridging, and the V2 skip path can send anything.
+    if (route && (compactV1 || compactV2)) {
+      assertWorkingInputLimit(route, JSON.stringify({ ...payload, tools: [], tool_choice: undefined }), { compaction: true });
+    }
+
     // Gate generation only, before conversion or any provider request.
     // Compaction summarizes existing history rather than continuing a goal.
     if (route?.goalContinuationGuard === true && !compactV1 && !compactV2) {

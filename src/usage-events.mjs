@@ -1,5 +1,10 @@
 import {
   appendFileSync,
+  closeSync,
+  fsyncSync,
+  openSync,
+  readSync,
+  writeSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -7,6 +12,8 @@ import {
   statSync,
 } from "node:fs";
 import path from "node:path";
+
+import { budgetError } from "./native-budget-identity.mjs";
 
 import { knownGenerationOutcome } from "./response-outcome.mjs";
 import { STATE_DIR } from "./paths.mjs";
@@ -758,4 +765,162 @@ export function observedInputCeilings() {
     // Telemetry must never break a status surface; report what was readable.
   }
   return highest;
+}
+
+// api-forwarder is the single admission writer. Reservation and fsync are
+// synchronous: another request cannot pass the check while a reservation is
+// outstanding. This is enforcement state in the existing ledger, not best-effort
+// display telemetry. Rows intentionally omit model/provider/token fields so they
+// cannot be mistaken for completed or billed requests by existing readers.
+const CUMULATIVE_VERSION = 1;
+const MAX_ADMISSION_LOG_BYTES = 256 * 1024 * 1024;
+const MAX_ADMISSION_LINE_BYTES = 1024 * 1024;
+const validCount = (value) => Number.isSafeInteger(value) && value >= 0;
+const scopeKey = (identity) => identity.kind === "worker"
+  ? `worker:${identity.threadId}` : `root:${identity.threadId}:${identity.turnId}`;
+
+export class CumulativeUsageAdmission {
+  #path;
+  #loaded = false;
+  #failed = false;
+  #boundary = false;
+  #scopes = new Map();
+  #attempts = new Map();
+  #ordinals = new Map();
+
+  constructor(filePath = USAGE_EVENTS_PATH) { this.#path = filePath; }
+
+  #failure() {
+    this.#failed = true;
+    return budgetError("The guarded route cannot persist or recover its cumulative admission accounting.");
+  }
+
+  #apply(row) {
+    const event = row?.cumulativeAdmission;
+    if (event === undefined) return; // Historical display rows are not enforcement evidence.
+    if (row.admissionVersion !== CUMULATIVE_VERSION) throw this.#failure();
+    if (event === "boundary") {
+      if (this.#boundary) throw this.#failure();
+      this.#boundary = true;
+      return;
+    }
+    if (!this.#boundary || typeof row.scope !== "string" || row.scope.length > 180 ||
+        typeof row.requestId !== "string" || row.requestId.length > 160 ||
+        !Number.isSafeInteger(row.attemptOrdinal) || row.attemptOrdinal < 1) throw this.#failure();
+    const id = `${row.requestId}:${row.attemptOrdinal}`;
+    if (event === "reservation") {
+      if (this.#attempts.has(id) || !validCount(row.estimatedInclusiveInput) || row.estimatedInclusiveInput < 1) throw this.#failure();
+      const previous = this.#ordinals.get(row.requestId) || 0;
+      if (row.attemptOrdinal !== previous + 1) throw this.#failure();
+      const total = this.#scopes.get(row.scope) || { attempts: 0, input: 0 };
+      const input = total.input + row.estimatedInclusiveInput;
+      if (!Number.isSafeInteger(input)) throw this.#failure();
+      this.#scopes.set(row.scope, { attempts: total.attempts + 1, input });
+      this.#attempts.set(id, { scope: row.scope, estimate: row.estimatedInclusiveInput, settled: false });
+      this.#ordinals.set(row.requestId, row.attemptOrdinal);
+      return;
+    }
+    if (event !== "outcome") throw this.#failure();
+    const attempt = this.#attempts.get(id);
+    if (!attempt || attempt.settled || attempt.scope !== row.scope ||
+        (row.observedInclusiveInput !== undefined && !validCount(row.observedInclusiveInput))) throw this.#failure();
+    const total = this.#scopes.get(row.scope);
+    const extra = Math.max(0, (row.observedInclusiveInput ?? 0) - attempt.estimate);
+    if (!Number.isSafeInteger(total.input + extra)) throw this.#failure();
+    total.input += extra; // No refund, including failures and unknown usage.
+    attempt.settled = true;
+  }
+
+  #load() {
+    if (this.#failed) throw this.#failure();
+    if (this.#loaded) return;
+    let fd;
+    try {
+      try { fd = openSync(this.#path, "r"); } catch (error) {
+        if (error.code === "ENOENT") { this.#loaded = true; return; }
+        throw error;
+      }
+      // Bounded incremental read: never allocate the full retained ledger.
+      const chunk = Buffer.alloc(64 * 1024);
+      let pending = Buffer.alloc(0);
+      let total = 0;
+      for (;;) {
+        const bytes = readSync(fd, chunk, 0, chunk.length, null);
+        if (!bytes) break;
+        total += bytes;
+        if (total > MAX_ADMISSION_LOG_BYTES) throw this.#failure();
+        pending = Buffer.concat([pending, chunk.subarray(0, bytes)]);
+        let newline;
+        while ((newline = pending.indexOf(10)) !== -1) {
+          if (newline > MAX_ADMISSION_LINE_BYTES) throw this.#failure();
+          const line = pending.subarray(0, newline).toString("utf8");
+          if (!line) throw this.#failure();
+          this.#apply(JSON.parse(line));
+          pending = pending.subarray(newline + 1);
+        }
+        if (pending.length > MAX_ADMISSION_LINE_BYTES) throw this.#failure();
+      }
+      if (pending.length) throw this.#failure(); // Truncated append is not safe to ignore.
+      this.#loaded = true;
+    } catch { throw this.#failure(); }
+    finally { if (fd !== undefined) closeSync(fd); }
+  }
+
+  #append(row) {
+    let fd;
+    try {
+      mkdirSync(path.dirname(this.#path), { recursive: true, mode: 0o700 });
+      fd = openSync(this.#path, "a", 0o600);
+      const bytes = Buffer.from(`${JSON.stringify({ admissionVersion: CUMULATIVE_VERSION, at: new Date().toISOString(), ...row })}\n`);
+      let written = 0;
+      while (written < bytes.length) {
+        const count = writeSync(fd, bytes, written, bytes.length - written);
+        if (count <= 0) throw this.#failure();
+        written += count;
+      }
+      fsyncSync(fd);
+    } catch { throw this.#failure(); }
+    finally { if (fd !== undefined) closeSync(fd); }
+  }
+
+  reserve({ identity, requestId, estimatedInput, limits }) {
+    this.#load();
+    if (!validCount(estimatedInput) || estimatedInput < 1 ||
+        !Number.isSafeInteger(limits?.maxAttempts) || limits.maxAttempts < 1 || limits.maxAttempts > 60 ||
+        !Number.isSafeInteger(limits?.maxInputTokens) || limits.maxInputTokens < 1 || limits.maxInputTokens > 10_000_000) {
+      throw budgetError("The guarded route has invalid cumulative admission bounds.");
+    }
+    if (!this.#boundary) {
+      const boundary = { cumulativeAdmission: "boundary" };
+      this.#append(boundary);
+      this.#apply({ admissionVersion: CUMULATIVE_VERSION, ...boundary });
+    }
+    const scope = scopeKey(identity);
+    const total = this.#scopes.get(scope) || { attempts: 0, input: 0 };
+    if (total.attempts >= limits.maxAttempts || total.input + estimatedInput > limits.maxInputTokens) {
+      throw budgetError("The native execution reached this route's cumulative attempt or estimated input limit.");
+    }
+    const row = { cumulativeAdmission: "reservation", scope, requestId,
+      attemptOrdinal: (this.#ordinals.get(requestId) || 0) + 1,
+      estimatedInclusiveInput: estimatedInput };
+    this.#append(row);
+    this.#apply({ admissionVersion: CUMULATIVE_VERSION, ...row });
+    return { scope, requestId, attemptOrdinal: row.attemptOrdinal };
+  }
+
+  settle(ticket, { observedInput, cachedInput } = {}) {
+    this.#load();
+    const attempt = this.#attempts.get(`${ticket.requestId}:${ticket.attemptOrdinal}`);
+    if (!attempt || attempt.scope !== ticket.scope) throw this.#failure();
+    if (attempt.settled) return false; // Callback duplicates never append a second outcome.
+    // Provider input counts include cached input. Never subtract a cache hit.
+    // Unknown, nonintegral, or negative counts retain the conservative estimate.
+    const observed = validCount(observedInput)
+      ? Math.max(observedInput, validCount(cachedInput) ? cachedInput : 0) : undefined;
+    const row = { cumulativeAdmission: "outcome", ...ticket,
+      ...(observed !== undefined ? { observedInclusiveInput: observed } : {}) };
+    this.#append(row);
+    this.#apply({ admissionVersion: CUMULATIVE_VERSION, ...row });
+    return true;
+  }
 }

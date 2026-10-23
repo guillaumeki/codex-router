@@ -28,6 +28,8 @@ import { preservedGeminiSchemas, zillowRangeSchema } from "./fixtures/gemini-too
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INTERNAL_KEY = "test-internal-service-key-with-sufficient-length";
 const CALLER_KEY = "test-router-caller-capability-with-sufficient-length";
+const nativeBudgetHeaders = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url))).requests[0];
+const { bridgeBudgetIdentity } = await import("../src/native-budget-identity.mjs");
 
 function routerBase(port) {
   return callerBaseUrl(port, CALLER_KEY);
@@ -6766,6 +6768,8 @@ test("API forwarder gives DeepSeek tool calls without reasoning an empty reasoni
         headers: {
           Authorization: `Bearer ${INTERNAL_KEY}`,
           "Content-Type": "application/json",
+          ...bridgeBudgetIdentity({ workingInputLimits: { cumulative: {} } },
+            { headers: nativeBudgetHeaders, codexRouterRequestId: `reasoning-test:${model}` }, {}).extra_headers,
         },
         body: JSON.stringify(history(model)),
       });
@@ -8403,7 +8407,7 @@ test("router normalizes forced tool choices before LiteLLM for auto-tool-choice 
   async function route(model, toolChoice) {
     const response = await fetch(`${routerBase(routerPort)}/responses`, {
       method: "POST",
-      headers,
+      headers: { ...headers, ...nativeBudgetHeaders },
       body: JSON.stringify({ model, input: "test", tool_choice: toolChoice }),
     });
     assert.equal(response.status, 200, router.testErrors());
