@@ -278,10 +278,7 @@ export function tokenUsageFromPayload(payload, { grokServiceTier = false } = {})
 // string -- simply finds no key to discount and is counted whole, exactly as
 // before.
 export function estimateInputTokens(body, { contextWindow, maxTokensPerImage } = {}) {
-  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ""), "utf8");
-  const images = promptImageUsage(buffer, maxTokensPerImage);
-  const bytes = buffer.byteLength - nonVisibleBytes(buffer) - images.bytes;
-  const estimate = Math.ceil(bytes / ESTIMATE_BYTES_PER_TOKEN) + images.tokens;
+  const { estimatedTokens: estimate } = requestInputSize(body, { maxTokensPerImage });
   if (estimate < MIN_ESTIMATED_INPUT_TOKENS) return undefined;
   // A request the provider answered cannot have exceeded the window, so the
   // estimate is never allowed to claim it did.
@@ -306,6 +303,20 @@ export function estimateInputTokens(body, { contextWindow, maxTokensPerImage } =
   return Number.isInteger(contextWindow) && contextWindow > 0
     ? Math.min(estimate, contextWindow)
     : estimate;
+}
+
+// Unclamped measurement for admission before transport. Unlike usage substitution,
+// admission must count small requests too. Text bytes exclude only known invisible
+// ciphertext and actual image references; image tokens use the existing bound.
+// This is a bytes/3.3 estimate, never an exact provider tokenizer count.
+export function requestInputSize(body, { maxTokensPerImage } = {}) {
+  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ""), "utf8");
+  const images = promptImageUsage(buffer, maxTokensPerImage);
+  const textBytes = buffer.byteLength - nonVisibleBytes(buffer) - images.bytes;
+  return {
+    textBytes,
+    estimatedTokens: Math.ceil(textBytes / ESTIMATE_BYTES_PER_TOKEN) + images.tokens,
+  };
 }
 
 // True only when the upstream explicitly said the prompt was empty. A missing

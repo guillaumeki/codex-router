@@ -71,6 +71,7 @@ const METADATA_FIELDS = new Set([
   "upgradeTo",
   "requiresTrailingUserTurn",
   "goalContinuationGuard",
+  "workingInputLimits",
   "isFree",
   "toolSchemaRecursion",
   "supportedEndpoints",

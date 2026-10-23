@@ -670,6 +670,16 @@ function modelProblem(model, providers, slugs, gatewayModels) {
   if (model.requestProfile !== undefined && !requestProfileKnown(model.requestProfile)) {
     return `model ${model.slug} has an invalid requestProfile`;
   }
+  if (model.workingInputLimits !== undefined) {
+    const limits = model.workingInputLimits;
+    const validPair = (pair) => pair && typeof pair === "object" && !Array.isArray(pair) &&
+      Number.isSafeInteger(pair.maxEstimatedTokens) && pair.maxEstimatedTokens > 0 &&
+      Number.isSafeInteger(pair.maxTextBytes) && pair.maxTextBytes > 0;
+    if (!limits || typeof limits !== "object" || Array.isArray(limits) ||
+        !validPair(limits.generation) || !validPair(limits.compaction)) {
+      return `model ${model.slug} has invalid workingInputLimits`;
+    }
+  }
   if (model.goalContinuationGuard !== undefined && typeof model.goalContinuationGuard !== "boolean") {
     return `model ${model.slug} has an invalid goalContinuationGuard flag`;
   }
