@@ -1,0 +1,1 @@
+- Apply the configured finite compaction input allowance to validated native automatic compaction requests on the ordinary Responses endpoint, including retries and failover.

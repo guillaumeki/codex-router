@@ -8,6 +8,7 @@ import test from "node:test";
 import { zstdDecompressSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 
+import { nativeCompactionIntent } from "../src/native-budget-identity.mjs";
 import { callerBaseUrl } from "../src/caller-auth.mjs";
 import { userModelEntry } from "../src/user-models.mjs";
 import { openPort } from "./port-pool.mjs";
@@ -47,6 +48,23 @@ async function waitForUsageEvents(stateDir, count) {
   }
   throw new Error(`Usage ledger did not record ${count} requests.`);
 }
+
+test("native compaction intent validates observed root, Desktop and worker scope", () => {
+  const fixtures = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url)));
+  assert.equal(nativeCompactionIntent({}), false);
+  for (const headers of [...fixtures.requests, ...fixtures.desktop_requests]) {
+    const metadata = JSON.parse(headers["x-codex-turn-metadata"]);
+    assert.equal(nativeCompactionIntent(headers), metadata.request_kind === "compaction");
+    const compact = { ...headers, "x-codex-turn-metadata": JSON.stringify({ ...metadata, request_kind: "compaction" }) };
+    assert.equal(nativeCompactionIntent(compact), true);
+    assert.throws(() => nativeCompactionIntent({ ...compact, "thread-id": "invalid" }),
+      (error) => error.code === "router_resource_budget_exceeded");
+  }
+  for (const raw of ["{", "null", "x".repeat(16_385)]) {
+    assert.throws(() => nativeCompactionIntent({ "x-codex-turn-metadata": raw }),
+      (error) => error.code === "router_resource_budget_exceeded");
+  }
+});
 
 test("route working input limits reject before transport and preserve admitted turns and bounded compaction", { timeout: 60_000 }, async (t) => {
   const stateDir = mkdtempSync(path.join(os.tmpdir(), "working-input-router-"));
@@ -92,14 +110,16 @@ test("route working input limits reject before transport and preserve admitted t
     { ...limits, generation: { maxEstimatedTokens: 2_000, maxTextBytes: 1_000_000 } },
     { ...limits, generation: { maxEstimatedTokens: 1_000_000, maxTextBytes: 5_000 } },
     undefined,
+    { generation: { maxEstimatedTokens: 200_000, maxTextBytes: 1_048_576 },
+      compaction: { maxEstimatedTokens: 1_000_000, maxTextBytes: 4_194_304 } },
   ].map((workingInputLimits, index) => ({
-    ...userModelEntry({ providerId: "custom", upstreamId: `working-input-${index}`, priority: 900 + index,
-      metadata: { autoCompact: 1_000, ...(index === 3 ? { contextWindow: 4_000_000 } : {}), ...(workingInputLimits ? { workingInputLimits } : {}) } }),
-    endpoint: { baseUrl: `${upstreamBase}/v1`, protocol: "openai-responses", keyless: true },
+    ...userModelEntry({ providerId: index === 4 ? "local" : "custom", upstreamId: `working-input-${index}`, priority: 900 + index,
+      metadata: { autoCompact: index === 4 ? 1_000_000 : 1_000, ...(index >= 3 ? { contextWindow: 4_000_000 } : {}), ...(workingInputLimits ? { workingInputLimits } : {}) } }),
+    ...(index === 4 ? {} : { endpoint: { baseUrl: `${upstreamBase}/v1`, protocol: "openai-responses", keyless: true } }),
   }));
   const modelsFile = path.join(stateDir, "user-models.json");
   writeFileSync(modelsFile, JSON.stringify({ version: 1, models: entries }));
-  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["custom", "opencode-go"] }));
+  writeFileSync(path.join(stateDir, "enabled-providers.json"), JSON.stringify({ version: 1, providers: ["local", "custom", "opencode-go"] }));
   writeFileSync(path.join(stateDir, "opencode-go-api-key.secret"), "test-working-input-provider-key");
   writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true,
     chain: ["opencode-go/deepseek-v4.1-flash"] }));
@@ -208,6 +228,38 @@ test("route working input limits reject before transport and preserve admitted t
   assert.match(replayBody, /verified/);
   assert.equal(upstreamRequests.length, beforeRetry + 2, "empty completion retries once");
   assert.deepEqual(upstreamRequests.at(-1), upstreamRequests.at(-2), "replay preserves admitted bytes");
+
+  // Native automatic compaction uses ordinary /responses, with no body trigger.
+  // Its validated transport intent must survive replay and failover as well.
+  const nativeFixtures = JSON.parse(readFileSync(new URL("./fixtures/native-budget-identity.json", import.meta.url))).requests;
+  const compactHeaders = nativeFixtures[10];
+  assert.equal(JSON.parse(compactHeaders["x-codex-turn-metadata"]).request_kind, "compaction");
+  const nativeHistory = [text("x".repeat(800_000))];
+  const beforeNativeCompact = upstreamRequests.length;
+  const admittedCompact = await send(4, { input: nativeHistory }, compactHeaders);
+  assert.equal(admittedCompact.status, 200, JSON.stringify(admittedCompact.body));
+  assert.equal(upstreamRequests.length, beforeNativeCompact + 1);
+  await reject(4, { input: nativeHistory }, nativeFixtures[9]);
+  await reject(4, { input: nativeHistory, request_kind: "compaction" });
+  await reject(4, { input: nativeHistory }, { ...compactHeaders, "thread-id": "invalid" });
+  await reject(4, { input: [text("x".repeat(4_300_000))] }, compactHeaders);
+  emptyOnce = true;
+  const beforeCompactRetry = upstreamRequests.length;
+  const compactReplay = await fetch(`${base}/responses`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...compactHeaders },
+    body: JSON.stringify({ model: entries[4].slug, input: nativeHistory, stream: true }), signal: AbortSignal.timeout(10_000),
+  });
+  const compactReplayBody = await compactReplay.text();
+  assert.equal(compactReplay.status, 200, compactReplayBody);
+  assert.match(compactReplayBody, /verified/);
+  assert.equal(upstreamRequests.length, beforeCompactRetry + 2);
+  writeFileSync(path.join(stateDir, "failover.json"), JSON.stringify({ version: 1, enabled: true, chain: [entries[4].slug] }));
+  quotaOnce = true;
+  const beforeCompactFailover = upstreamRequests.length;
+  const compactFailover = await send(3, { input: nativeHistory }, compactHeaders);
+  assert.equal(compactFailover.status, 200, JSON.stringify(compactFailover.body));
+  assert.equal(upstreamRequests.length, beforeCompactFailover + 2);
+  writeFileSync(path.join(stateDir, "provider-cooldowns.json"), "{}");
 
   // V1 and native V2 use the larger, finite compaction allowance.
   for (const endpoint of ["/responses/compact", "/responses"]) {

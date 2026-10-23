@@ -1,4 +1,4 @@
-import { bridgeBudgetIdentity } from "./native-budget-identity.mjs";
+import { bridgeBudgetIdentity, nativeCompactionIntent } from "./native-budget-identity.mjs";
 import { rejectGenerationRedirect } from "./generation-redirect.mjs";
 import { resolveGenerationOutcome } from "./response-outcome.mjs";
 import { readFileSync } from "node:fs";
@@ -4425,7 +4425,7 @@ async function attemptModelFailover({
         headers: built.headers,
         body: built.body,
         signal,
-      });
+      }, { compaction: Boolean(model.workingInputLimits) && nativeCompactionIntent(request.headers) });
       progress?.headers();
     } catch (error) {
       if (signal.aborted || error?.code === "router_resource_budget_exceeded") throw error;
@@ -4495,7 +4495,9 @@ async function handleResponses(request, response, requestUrl) {
   const activity = beginRequestActivity({ request, response, controller });
   const fetchObservedUpstream = async (url, init) => {
     activity.progress.attempt();
-    const upstream = await fetchForRoute(route, url, init);
+    const upstream = await fetchForRoute(route, url, init, {
+      compaction: Boolean(route?.workingInputLimits) && nativeCompactionIntent(request.headers),
+    });
     activity.progress.headers();
     return upstream;
   };
